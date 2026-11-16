@@ -1,0 +1,11 @@
+{
+  "name": "airhand-studio-tests",
+  "version": "0.8.0",
+  "private": true,
+  "scripts": {
+    "test:viewer3d": "node tools/verify_viewer3d.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

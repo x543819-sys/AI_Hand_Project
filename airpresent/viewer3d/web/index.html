@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AirHand Studio · 三维交互展示台</title><link rel="stylesheet" href="style.css">
+<script type="importmap">{"imports":{"three":"./vendor/three.module.min.js","three/addons/":"./vendor/"}}</script>
+</head><body>
+<header><div class="brand"><span class="brand-icon">◈</span><div><strong>AirHand <b>Studio</b></strong><small>三维交互展示台</small></div></div><div class="header-note">把模型拿到手边，把结构讲清楚。</div><span class="pill" id="connection">正在连接本机服务</span><button id="exit" class="subtle">退出工作台</button></header>
+<main>
+<aside class="library">
+<div class="eyebrow">WORKSPACE / 01</div><h2>模型与结构</h2><p class="muted">先用鼠标探索，再开启手势。</p>
+<button id="builtin" class="model-card"><span class="model-icon">◉</span><span><strong>模块化光学探头</strong><small>内置示意模型 · 可拆解</small></span><span class="arrow">↗</span></button>
+<label class="upload" for="file">＋ 导入本地 .glb 模型<input id="file" type="file" accept=".glb" hidden></label>
+<p class="micro">支持内嵌资源的 GLB，最大 50 MB。模型留在浏览器本机处理。</p>
+<div class="section-title"><span>零件列表</span><span id="part-count">—</span></div><div id="parts" class="parts"></div>
+<div class="library-bottom"><span class="dot"></span>本地渲染 · 无需模型 API<small>Three.js r180 / MediaPipe</small></div>
+</aside>
+<section class="stage-panel">
+<div class="stage-top"><div><div class="eyebrow">INTERACTIVE EXHIBITION</div><h1 id="model-title">模块化光学探头</h1></div><button id="reset" class="light-button">↺ 复位视图</button></div>
+<div id="stage"><div class="stage-caption"><span>拖动旋转</span><span>滚轮缩放</span><span>点击选择零件</span></div><div id="hand-cursor" hidden></div><div class="orientation">Y ↑<br><span>Z ↙ &nbsp; X →</span></div><div id="empty-error" hidden></div></div>
+<div class="stage-tools"><div><label for="explode">结构拆解</label><input id="explode" type="range" min="0" max="1" step="0.01" value="0"><output id="explode-label">0%</output></div><label><input id="wireframe" type="checkbox"> 线框</label><button id="isolate">仅看选中零件</button><button id="show-all">显示全部</button></div>
+<div class="selection"><span class="selection-icon">⌖</span><div><small>当前选择</small><strong id="selected-name">尚未选择零件</strong><p id="selected-description">点击模型或左侧列表，查看组成部分。</p></div></div>
+<div id="notice" role="status">已就绪。可直接用鼠标浏览模型。</div>
+</section>
+<aside class="interaction">
+<div class="section-title"><span>手势控制</span><span class="pill amber" id="active-state">未启用</span></div>
+<div class="camera-preview"><img id="camera-image" hidden alt="本机手部追踪预览"><div id="camera-placeholder"><span>⌁</span><strong>摄像头未开启</strong><small>点击下方按钮连接</small></div><span class="fps" id="fps">— FPS</span></div>
+<div class="camera-row"><label>相机 <select id="camera-index"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option></select></label><button id="camera-toggle">开启摄像头</button></div>
+<button id="enable" class="primary" disabled>启用手势控制</button>
+<p id="gesture-status" class="gesture-status">鼠标操作始终可用。</p>
+<div class="section-title"><span>操作模式</span><span class="micro">按 1 / 2 / 3 / 4</span></div>
+<div class="modes"><button data-mode="rotate" class="chosen"><span>↻</span>旋转<small>捏合后左右 / 上下移动</small></button><button data-mode="zoom"><span>⤢</span>缩放<small>捏合后上移放大、下移缩小</small></button><button data-mode="pan"><span>✥</span>平移<small>捏合后移动模型</small></button><button data-mode="select"><span>⌖</span>选择<small>对准零件，捏合确认</small></button></div>
+<label class="sensitivity">动作灵敏度 <output id="sensitivity-label">1.0×</output><input id="sensitivity" type="range" min="0.4" max="2" step="0.1" value="1"></label>
+<div class="tip"><strong>捏住才操作，松开就停住。</strong><p>每次启用或切换模式后，先分开指尖。手离开画面时模型保持原位。</p><small>Esc 暂停手势 · R 复位视图</small></div>
+</aside>
+</main><footer><span>AirHand Studio · 实验版本 0.8</span><span>短动作 / 明确模式 / 随时复位</span><span id="camera-status">摄像头画面仅在本机处理</span></footer>
+<script type="module" src="viewer.js"></script></body></html>
