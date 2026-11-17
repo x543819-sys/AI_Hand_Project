@@ -1,10 +1,18 @@
 # AI Hand Project · AirHand Studio
 
-基于普通摄像头的手势交互项目，包含三维模型展示工作台和 PowerPoint 演示助手。当前版本 v0.8，面向课程/毕设与交互原型验证。
+基于普通摄像头的手势交互项目，包含 ROS 2 / Gazebo 机械臂仿真、三维模型展示工作台和 PowerPoint 演示助手。当前版本 v0.9.1，面向课程/毕设与交互原型验证。
 
 ![三维交互展示台](docs/images/viewer3d.png)
 
 ## 功能
+
+### 机械臂仿真
+
+- Windows 手势识别桥接 WSL ROS 2，控制 Gazebo 三关节机械臂。
+- 捏合离合与相对速度控制，支持 XY / XZ 平面切换；面板显示实际关节和末端位置。
+- 独立会话、输入超时、松手/丢手/断连停止和工作区限制。
+- 控制台内显示实际关节姿态、捏合原点和方向箭头；按住方向按钮也能操作。默认省去独立 3D 窗口，可按需打开 Gazebo GUI。
+- 需要另行安装 Ubuntu 24.04 / ROS 2 Jazzy / Gazebo Harmonic；当前为解析 IK + 关节轨迹控制，MoveIt Servo 与夹爪抓取待接入。
 
 ### 三维工作台
 
@@ -35,6 +43,7 @@ cd AI_Hand_Project
 
 - 双击 `run_3d.bat`：打开三维工作台。先试鼠标，再开启摄像头并启用手势。
 - 双击 `run.bat`：打开 PPT 助手。也可从顶部「3D 工作台」切换场景。
+- 双击 `run_robot.bat`：启动机械臂工作台和 Gazebo 物理仿真；先按住方向按钮确认能动，再打开摄像头并启用手势。详见 [机械臂指南](ROBOT_ARM_GUIDE.md)。
 - 三维操作：`1/2/3/4` 切换旋转/缩放/平移/选择，`Esc` 暂停手势，`R` 复位。
 - 退出工作台可关闭相机与本机服务。避免两个程序同时占用摄像头。
 
@@ -47,6 +56,9 @@ cd AI_Hand_Project
 安装版本记录见 requirements-lock.txt；setup.bat 使用 requirements.txt 的直接依赖。虚拟环境、个人配置、备份与会话记录均被 Git 忽略。
 
 ## 文档
+
+- [机械臂仿真使用与限制](ROBOT_ARM_GUIDE.md)
+- [机器人开源参考与演进方案](ROBOTICS_PLAN.md)
 
 - [三维工作台使用与限制](VIEWER3D_GUIDE.md)
 - [GitHub 参考、采用/舍弃的做法与版本](VIEWER3D_REFERENCES.md)
@@ -63,7 +75,7 @@ cd AI_Hand_Project
 .\.venv\Scripts\python.exe tools/verify_ui.py
 ```
 
-v0.8 的 91 项 Python 测试与原界面检查通过。浏览器验证覆盖真实 WebGL 渲染、GLB 导入、选择拆解、合成捏合旋转、丢手重入与暂停；合成输入不能替代真人手势体验。用户已试用基本控制，手感仍有优化空间。
+v0.8 的 91 项 Python 测试与原界面检查通过；v0.9 新增机器人意图、运动学与协议检查。机械臂联调使用 Windows 合成手势连接真实 Gazebo，验证实际移动与停止。浏览器验证覆盖真实 WebGL 渲染、GLB 导入、选择拆解、合成捏合旋转、丢手重入与暂停；合成输入不能替代真人手势体验。用户已试用三维基本控制，机械臂真人手感待试用。
 
 三维端到端测试可选安装 Node.js 与 Playwright：
 

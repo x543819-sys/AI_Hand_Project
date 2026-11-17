@@ -48,9 +48,10 @@ class GestureClassifier:
     ratio before calling this class. Out-of-plane occlusion remains a limitation.
     """
 
-    def __init__(self):
+    def __init__(self, index_only=False):
         self.pinching = False
         self.pinch_target = None
+        self.index_only = index_only
 
     def classify(self, landmarks):
         if not landmarks or len(landmarks) != 21:
@@ -82,6 +83,8 @@ class GestureClassifier:
         # for pause and palm gestures instead of promising universal thumb rules.
         contacts = {}
         for gesture_id, tip, base in ((Gesture.PINCH_NEXT, 8, 5), (Gesture.PINCH_PREVIOUS, 12, 9)):
+            if self.index_only and gesture_id != Gesture.PINCH_NEXT:
+                continue
             # Fingertips near the palm in a fist must not become page clicks.
             outside_palm = distance(landmarks[tip], wrist) > distance(landmarks[base], wrist) + 0.15 * scale
             if outside_palm and palm_size > 1e-6:

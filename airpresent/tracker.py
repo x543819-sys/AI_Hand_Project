@@ -49,9 +49,10 @@ class Frame:
 
 
 class CameraWorker:
-    def __init__(self, settings: Settings, model_path: Path):
+    def __init__(self, settings: Settings, model_path: Path, classifier_factory=GestureClassifier):
         self.settings = settings
         self.model_path = model_path
+        self.classifier_factory = classifier_factory
         self.frames = Queue(maxsize=1)
         self.messages = Queue()
         self.stop_event = threading.Event()
@@ -105,7 +106,7 @@ class CameraWorker:
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             cap.set(cv2.CAP_PROP_FPS, 30)
-            classifier = GestureClassifier()
+            classifier = self.classifier_factory()
             previous = time.monotonic()
             last_stamp = -1
             failures = 0
