@@ -1,6 +1,8 @@
 """Windows camera workbench with explicit operator, tracking and motion states."""
 from pathlib import Path
 import math
+import json
+from collections import deque
 from queue import Queue, Empty
 import threading
 import time
@@ -14,6 +16,8 @@ from .control import Operator, hand_input, valid_point
 from .session import Session
 from .wire import Client
 from .kinematics import L1,HEIGHT,fk
+from .monitor import Monitor,paint_arm
+from .intent import DEADZONE
 
 
 PHASES={
@@ -41,14 +45,15 @@ class Workbench:
         self.camera_error=''
         self.sim_session=None
         self.arm_key=None
+        self.monitor=None;self.arm_plane='xy';self.arm_origin=None;self.arm_trail=deque(maxlen=150)
         root.tk.call('tk','scaling',96/72)
-        root.title('AirHand · 机械臂控制台 v0.9.1');root.geometry('1160x820');root.minsize(1040,760)
+        root.title('AirHand · 机械臂控制台 v0.9.2');root.geometry('1160x820');root.minsize(1040,760)
         root.configure(bg='#111b26');root.protocol('WM_DELETE_WINDOW',self.close)
         style=ttk.Style(root);style.theme_use('clam')
         style.configure('TButton',padding=8,font=('Microsoft YaHei UI',10))
         self.status=tk.StringVar(value='正在启动 Gazebo；摄像头默认关闭…')
         self.control=tk.StringVar(value='等待仿真就绪')
-        self.hint=tk.StringVar(value='先按住右侧方向按钮试动，确认模型能响应。')
+        self.hint=tk.StringVar(value='点击右侧一个方向，自动移动 1.5 厘米。')
         self.camera_status=tk.StringVar(value='摄像头未打开')
         self.metrics=tk.StringVar(value='等待实际关节反馈');self.motion=tk.StringVar(value='速度指令：0 cm/s')
         self._label(root,'机械臂控制台',size=19,color='#65e0bc').pack(anchor='w',padx=22,pady=(16,8))
@@ -65,19 +70,17 @@ class Workbench:
         self.index=tk.StringVar(value='0');ttk.Spinbox(row,from_=0,to=9,width=3,textvariable=self.index).pack(side='left',padx=8)
         self.camera_button=ttk.Button(row,text='打开摄像头',command=self.toggle_camera);self.camera_button.pack(side='left')
         ttk.Button(row,text='停止所有控制 / 空格',command=self.pause).pack(side='left',padx=8)
+        ttk.Button(row,text='悬浮控制窗',command=self.open_monitor).pack(side='left')
         self._label(left,'画面右移 → 伸出 X+  |  上移 → 侧移 Y+ / 升高 Z+；按基座坐标控制。',size=10).pack(anchor='w')
-        self._label(right,'1  先按住按钮试动',size=13,color='#ffffff').pack(anchor='w')
-        self._label(right,'不需要摄像头 · 松开按钮即停止',size=10).pack(anchor='w',pady=(3,7))
+        self._label(right,'1  点击按钮步进',size=13,color='#ffffff').pack(anchor='w')
+        self._label(right,'每次约 1.5 厘米 · 空格立即停止',size=10).pack(anchor='w',pady=(3,7))
         self.gui_button=ttk.Button(right,text='打开 Gazebo 3D（可选）',command=self.open_gui,state='disabled')
         self.gui_button.pack(fill='x',pady=(0,5))
         grid=tk.Frame(right,bg='#111b26');grid.pack(fill='x')
         self.jog_buttons={}
         for i,(direction,title) in enumerate([('x+','伸出 X+'),('x-','收回 X−'),('y+','侧移 Y+'),('y-','侧移 Y−'),('z+','抬高 Z+'),('z-','降低 Z−')]):
-            button=ttk.Button(grid,text=title,state='disabled',takefocus=False)
+            button=ttk.Button(grid,text=title,state='disabled',takefocus=False,command=lambda d=direction:self.press_jog(d))
             button.grid(row=i//2,column=i%2,sticky='ew',padx=2,pady=3)
-            button.bind('<ButtonPress-1>',lambda event,d=direction:self.press_jog(d))
-            button.bind('<ButtonRelease-1>',lambda event:self.operator.release('鼠标按键已松开，机械臂停止'))
-            button.bind('<Leave>',lambda event:self.operator.release('鼠标移出按钮，已停止；请将鼠标留在按钮上按住'))
             self.jog_buttons[direction]=button
         grid.columnconfigure((0,1),weight=1)
         self._label(right,'2  再启用摄像头手势',size=13,color='#ffffff').pack(anchor='w',pady=(17,7))
@@ -93,9 +96,8 @@ class Workbench:
         footer=self._label(root,variable=self.status,size=10);footer.configure(wraplength=1100)
         footer.pack(fill='x',padx=22,pady=(0,14))
         root.bind('<space>',lambda event:self.pause());root.bind('<Escape>',lambda event:self.pause())
-        root.bind_all('<ButtonRelease-1>',lambda event:self.operator.release('鼠标已松开，机械臂停止'),add='+')
-        root.bind('<FocusOut>',self.focus_out)
-        root.bind('<Unmap>',lambda event:self.operator.release('控制台已隐藏，按钮控制停止') if event.widget==self.root else None)
+        root.bind('<Unmap>',lambda event:self.operator.release('控制台已隐藏，按钮控制停止') if event.widget==self.root and self.monitor is None else None)
+        root.bind('<Map>',lambda event:root.after(100,self.refresh_window) if event.widget==root else None)
         self.worker=threading.Thread(target=self.network,name='robot-simulation',daemon=False);self.worker.start()
         root.after(40,self.poll)
 
@@ -114,7 +116,7 @@ class Workbench:
             if not force and self.preview.find_withtag('idle'):return
             self.preview.delete('all')
             self.preview.create_text(self.preview.winfo_width()/2,max(100,self.preview.winfo_height()/2-60),
-                text='先按住右侧按钮，确认机械臂能动\n\n然后打开摄像头 → 启用手势',
+                text='点击右侧一个方向，自动步进 1.5 厘米\n\n然后打开摄像头 → 启用手势',
                 fill='#a2b4c5',font=('Microsoft YaHei UI',15),justify='center',tags='idle')
 
     def pause(self):self.operator.pause()
@@ -126,10 +128,32 @@ class Workbench:
         if self.enabled:self.pause()
         else:self.enable()
 
-    def change_mode(self,event=None):self.operator.plane('xz' if self.plane.get().startswith('XZ') else 'xy')
+    def change_mode(self,event=None):
+        self.arm_plane='xz' if self.plane.get().startswith('XZ') else 'xy'
+        self.operator.plane(self.arm_plane)
+        if self.monitor:self.monitor.plane.set(self.arm_plane)
 
     def press_jog(self,direction):
-        if self.feedback.get('ready') and not self.closed.is_set():self.operator.press(direction)
+        if self.feedback.get('ready') and self.feedback.get('actual_tip') and not self.closed.is_set():
+            self.arm_plane='xz' if direction.startswith('z') else 'xy'
+            if self.monitor:self.monitor.plane.set(self.arm_plane)
+            self.operator.step(direction,self.feedback['actual_tip'],time.monotonic())
+
+    def open_monitor(self):
+        if self.monitor is None:self.monitor=Monitor(self)
+        self.monitor.window.deiconify();self.monitor.window.lift()
+        self.root.attributes('-topmost',False)
+        self.root.lower()
+
+    def show_main(self):
+        visible=self.root.winfo_viewable()
+        self.root.deiconify();self.root.lift()
+        if visible:self.root.after_idle(self.refresh_window)
+
+    def refresh_window(self):
+        if not self.root.winfo_viewable():return
+        self.arm_key=None;self.last_render=0
+        self.idle_preview(force=True);self.root.update_idletasks()
 
     def open_gui(self):
         if self.sim_session:
@@ -154,7 +178,7 @@ class Workbench:
         session=client=None
         try:
             session=self.session_factory(self.project,gui=self.gui);self.sim_session=session;self.events.put(('session',str(session.folder)))
-            deadline=time.monotonic()+120
+            deadline=time.monotonic()+120;previous_rate=None;rate=None;last_trace=0
             while not self.stop.is_set():
                 try:
                     if client is None:
@@ -173,7 +197,23 @@ class Workbench:
                         observation,age,hint=hand_input(self.frame,time.monotonic())
                         # Tracking gaps stop motion, preserving operator permission.
                         state=client.send(observation,enabled,mode,age)
-                    state['_local_hint']=hint;self.events.put(('feedback',state));self.stop.wait(.05)
+                    now=time.monotonic()
+                    self.operator.advance_step(state.get('actual_tip'),now,state['ready'],state.get('guard_reason',''))
+                    sim=state.get('sim_time')
+                    if sim is not None:
+                        if previous_rate:
+                            wall=now-previous_rate[0]
+                            if wall>.001:
+                                measured=max(0.,(sim-previous_rate[1])/wall)
+                                rate=measured if rate is None else .8*rate+.2*measured
+                        previous_rate=(now,sim)
+                    state['_sim_rate']=rate;state['_local_hint']=hint
+                    if now-last_trace>.2:
+                        info={k:state.get(k) for k in ('source','phase','sim_time','actual_tip','target_tip','command_velocity','ready','guard_reason','_sim_rate','tick_age_ms')}
+                        info.update(enabled=self.enabled,jog=self.operator.snapshot()[3],camera_hint=hint)
+                        with (session.folder/'control_trace.jsonl').open('a',encoding='utf-8') as trace:trace.write(json.dumps(info,ensure_ascii=False)+'\n')
+                        last_trace=now
+                    self.events.put(('feedback',state));self.stop.wait(.05)
                 except (OSError,ValueError,ConnectionError) as exc:
                     reason='连接中断，已停止：'+str(exc)+'；恢复后需重新启用'
                     self.operator.pause(reason);self.events.put(('error',reason))
@@ -196,7 +236,9 @@ class Workbench:
         camera_available=self.frame is not None or self.camera and self.camera.running
         self.enable_button.configure(state='normal' if ready and camera_available else 'disabled',
             text='停用手势' if enabled else '启用手势' if camera_available else '先打开摄像头')
-        for button in self.jog_buttons.values():button.configure(state='normal' if ready else 'disabled')
+        for button in self.jog_buttons.values():
+            desired='normal' if ready else 'disabled'
+            if str(button.cget('state'))!=desired:button.configure(state=desired)
         self.gui_button.configure(state='normal' if ready else 'disabled')
         color='#65e0bc'
         if self.closing:title='正在停止仿真…';hint='请等待窗口自动关闭。'
@@ -207,7 +249,7 @@ class Workbench:
         elif state.get('guard_reason'):
             title='机械臂已停住 · '+state['guard_reason'];hint='手势请先松开；按钮请松开后换一个方向。';color='#edbf70'
         elif source=='buttons' and jog:
-            title='按钮控制：'+jog+' · 按住移动';hint='松开鼠标停止；想用手势时点击“启用手势”。'
+            title='步进中：'+jog+' · 约 1.5 厘米';hint='松开鼠标后仍会完成本次步进；空格或停止按钮可中止。'
         elif not enabled:
             title='手势未启用 · 按钮可以使用';hint=reason
         elif self.local_hint:
@@ -224,6 +266,8 @@ class Workbench:
         text='速度 / cm/s：X %+.1f  Y %+.1f  Z %+.1f'%tuple(x*100 for x in v)
         if target:text+='\n目标 / m：% .3f / % .3f / % .3f'%tuple(target)
         self.motion.set(text)
+        rate=state.get('_sim_rate')
+        if rate is not None:self.status.set('仿真速度 %.2f×（1×为正常速度） · '%rate+state.get('status',''))
 
     def render_frame(self):
         frame=self.frame
@@ -237,7 +281,7 @@ class Workbench:
         palm=frame.observation.palm or frame.observation.pointer
         if valid_point(anchor) and valid_point(palm):
             ax,ay=left+anchor[0]*w,top+anchor[1]*h;px,py=left+palm[0]*w,top+palm[1]*h
-            r=.02*w
+            r=DEADZONE*w
             self.preview.create_oval(ax-r,ay-r,ax+r,ay+r,outline='#ffcf6e',width=3)
             self.preview.create_text(ax,ay-28,text='原点 · 回到这里减速',fill='#ffcf6e',font=('Microsoft YaHei UI',11))
             self.preview.create_line(ax,ay,px,py,fill='#65e0bc',width=4,arrow='last')
@@ -253,21 +297,12 @@ class Workbench:
         if q is None:return
         width=self.preview.winfo_width();height=self.preview.winfo_height()
         large=self.frame is None
-        key=(tuple(round(v,4) for v in q),width,height,large)
+        key=(tuple(round(v,4) for v in q),width,height,large,self.arm_plane)
         if key==self.arm_key and self.preview.find_withtag('arm_feedback'):return
         self.arm_key=key;self.preview.delete('arm_feedback')
-        x0=8 if large else max(8,width-270)
-        y0=max(8,height*.42) if large else max(8,height-204);tags='arm_feedback'
-        self.preview.create_rectangle(x0,y0,width-8,height-8,fill='#172936',outline='#3d5968',tags=tags)
-        self.preview.create_text(x0+12,y0+18,anchor='w',text='Gazebo 实际姿态（关节回读）',fill='#b9cbd8',font=('Microsoft YaHei UI',10),tags=tags)
-        yaw,shoulder,_=q
-        elbow=(L1*math.cos(shoulder)*math.cos(yaw),L1*math.cos(shoulder)*math.sin(yaw),HEIGHT+L1*math.sin(shoulder))
-        points=[(0.,0.,0.),(0.,0.,HEIGHT),elbow,fk(q)]
-        scale=min(480,(height-y0-35)/.5) if large else 245
-        projected=[(x0+85+scale*(x-.65*y),height-30-scale*(z+.3*y)) for x,y,z in points]
-        for i,(a,b) in enumerate(zip(projected,projected[1:])):
-            self.preview.create_line(*a,*b,fill=('#6f8795','#65e0bc','#b9cbd8')[i],width=10,tags=tags)
-        for x,y in projected:self.preview.create_oval(x-5,y-5,x+5,y+5,fill='#ffcf6e',outline='',tags=tags)
+        x0=8 if large else max(8,width-360)
+        y0=max(8,height*.42) if large else max(8,height-250)
+        paint_arm(self.preview,q,(x0,y0,width-8,height-8),self.arm_plane,self.arm_trail,self.arm_origin)
 
     def poll(self):
         try:
@@ -275,6 +310,10 @@ class Workbench:
                 kind,data=self.events.get_nowait()
                 if kind=='feedback':
                     self.feedback=data;self.local_hint=data.get('_local_hint','')
+                    tip=data.get('actual_tip')
+                    if tip:
+                        if self.arm_origin is None:self.arm_origin=tuple(tip)
+                        if not self.arm_trail or math.dist(self.arm_trail[-1],tip)>.0001:self.arm_trail.append(tuple(tip))
                     self.status.set('ROS / Gazebo：'+data['status'])
                 elif kind=='session':self.status.set('会话日志：'+data)
                 elif kind=='error':self.status.set(data);self.feedback={}
@@ -289,7 +328,9 @@ class Workbench:
                         self.operator.pause((self.camera_error or message)+'；重新打开摄像头后再启用');self.frame=None
                         self.camera_button.configure(text='打开摄像头',state='normal')
             except Empty:pass
-        self.render_state();self.render_frame();self.render_arm()
+        self.render_state()
+        if self.root.winfo_viewable():self.render_frame();self.render_arm()
+        if self.monitor:self.monitor.render()
         if self.closing and self.closed.is_set():self.root.destroy();return
         self.root.after(40,self.poll)
 

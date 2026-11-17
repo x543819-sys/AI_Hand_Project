@@ -56,26 +56,47 @@ def main():
         print('Stage: controller ready',flush=True)
         assert app.camera is None and not app.enabled
         initial=app.feedback['actual_tip']
+        app.render_arm()
+        def end_marker(canvas):
+            ids=[i for i in canvas.find_withtag('arm_feedback') if canvas.type(i)=='oval']
+            return canvas.coords(ids[-1])
+        initial_marker=end_marker(app.preview)
         button=app.jog_buttons['y-']
-        # Inject only this widget's press/release bindings. External desktop
-        # pointer/focus events must not interfere with a synthetic hold.
-        tags=button.bindtags();leave=button.bind('<Leave>');focus=root.bind('<FocusOut>')
-        button.bindtags((str(button),));button.unbind('<Leave>');root.unbind('<FocusOut>')
-        button.event_generate('<ButtonPress-1>',x=10,y=10)
-        print('Stage: manual press',flush=True)
+        clicked=time.monotonic();first_motion=None
+        button.invoke()  # Standard command, without suppressing widget bindings.
+        button.event_generate('<Leave>')
+        print('Stage: click step',flush=True)
         deadline=time.monotonic()+6
         while time.monotonic()<deadline:
             pump(.15)
-            if app.feedback['actual_tip'][1]<initial[1]-.012:break
+            if first_motion is None and abs(app.feedback['actual_tip'][1]-initial[1])>.001:first_motion=time.monotonic()-clicked
+            if app.operator.snapshot()[3] is None:break
         moved=app.feedback['actual_tip']
         result['manual_y_motion']=moved[1]-initial[1]
         assert moved[1]<initial[1]-.008,(app.operator.snapshot(),app.control.get(),app.feedback)
-        button.event_generate('<ButtonRelease-1>',x=10,y=10)
-        button.bindtags(tags);button.bind('<Leave>',leave);root.bind('<FocusOut>',focus)
+        result['step_completed']=app.operator.snapshot()[3] is None
+        assert result['step_completed'],app.operator.snapshot()
+        result['simulation_rate']=app.feedback.get('_sim_rate')
+        result['first_motion_seconds']=first_motion;result['step_seconds']=time.monotonic()-clicked
+        app.render_arm();result['main_marker_pixels']=math.dist(initial_marker,end_marker(app.preview))
+        assert result['main_marker_pixels']>1,'Actual arm view did not move'
         pump(.6)
         stopped=app.feedback['actual_tip'];pump(.6)
         result['manual_release_drift']=math.dist(stopped,app.feedback['actual_tip'])
         assert result['manual_release_drift']<.01
+        app.open_monitor();pump(.2)
+        assert app.monitor.window.winfo_viewable() and app.monitor.window.attributes('-topmost')
+        monitor_before=end_marker(app.monitor.canvas);before=app.feedback['actual_tip']
+        app.monitor.buttons[2].invoke()  # y+ from the floating controls.
+        deadline=time.monotonic()+6
+        while time.monotonic()<deadline:
+            pump(.15)
+            if app.operator.snapshot()[3] is None:break
+        assert app.feedback['actual_tip'][1]>before[1]+.008
+        assert math.dist(monitor_before,end_marker(app.monitor.canvas))>1
+        result['floating_step_and_view']='PASS'
+        window=app.monitor.window
+        ImageGrab.grab(bbox=(window.winfo_rootx(),window.winfo_rooty(),window.winfo_rootx()+window.winfo_width(),window.winfo_rooty()+window.winfo_height())).save(folder/'robot_floating.png')
         app.camera=camera
         pump(.25,pose());app.enable_button.invoke();wait_phase('ready',pose())
         print('Stage: hand ready',flush=True)
@@ -110,6 +131,14 @@ def main():
         pump(.3,pose(pinch=True));assert app.feedback['phase']=='release'
         pump(.3,pose());pump(.35,pose(pinch=True))
         assert app.feedback['phase']=='center'
+        max_tick_age=0
+        for i in range(30):
+            pump(.4,pose(.5,.54 if (i//5)%2==0 else .46,True))
+            max_tick_age=max(max_tick_age,app.feedback['tick_age_ms'])
+            assert app.feedback['ready'] and app.feedback['tick_age_ms']<250,app.feedback
+        result['continuous_control_seconds']=12;result['max_tick_age_ms']=max_tick_age
+        pump(.3,pose());pump(.35,pose(pinch=True))
+        app.monitor.close();pump(.2,pose(pinch=True))
         app.render_state();root.attributes('-topmost',True);pump(.1,pose(pinch=True))
         ImageGrab.grab(bbox=(root.winfo_rootx(),root.winfo_rooty(),root.winfo_rootx()+root.winfo_width(),root.winfo_rooty()+root.winfo_height())).save(folder/'robot_interaction.png')
         app.pause();pump(.3,pose(pinch=True));assert not app.enabled and not app.feedback['deadman']

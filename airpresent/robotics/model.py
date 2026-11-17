@@ -5,7 +5,7 @@ from xml.sax.saxutils import escape
 
 CONTROLLERS='''controller_manager:
   ros__parameters:
-    update_rate: 250
+    update_rate: 100
     enforce_command_limits: true
     airhand_joint_states:
       type: joint_state_broadcaster/JointStateBroadcaster
@@ -24,6 +24,10 @@ airhand_arm_controller:
 
 def create_model(folder):
     folder=Path(folder)
+    installed=Path('/opt/ros/jazzy/opt/gz_sim_vendor/share/gz/gz-sim8/worlds/empty.sdf')
+    if installed.exists():
+        world=installed.read_text().replace('<max_step_size>0.001</max_step_size>','<max_step_size>0.005</max_step_size>')
+        (folder/'world.sdf').write_text(world,encoding='utf-8')
     # Adapt the locally installed Gazebo GUI at runtime; no vendor file is bundled.
     template=Path('/opt/ros/jazzy/opt/gz_sim_vendor/share/gz/gz-sim8/gui/gui.config')
     if template.is_file():

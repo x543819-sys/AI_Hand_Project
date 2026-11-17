@@ -15,9 +15,11 @@ def main():
     import argparse
     import rclpy
     from rclpy.node import Node
+    from rclpy.clock import Clock
+    from rclpy.clock_type import ClockType
     from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import JointState
-    from rosgraph_msgs.msg import Clock
+    from rosgraph_msgs.msg import Clock as ClockMessage
     from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
     from controller_manager_msgs.srv import ListControllers
     from tf2_ros import Buffer, TransformListener
@@ -35,10 +37,12 @@ def main():
             self.last_input=0;self.report_time=0;self.stopping=threading.Event()
             self.pub=self.create_publisher(JointTrajectory,'/airhand_arm_controller/joint_trajectory',10)
             self.create_subscription(JointState,'/joint_states',self.feedback,qos_profile_sensor_data)
-            self.create_subscription(Clock,'/clock',self.clock_feedback,qos_profile_sensor_data)
+            self.create_subscription(ClockMessage,'/clock',self.clock_feedback,qos_profile_sensor_data)
             self.manager=self.create_client(ListControllers,'/controller_manager/list_controllers')
             self.tf=Buffer();self.tf_listener=TransformListener(self.tf,self)
-            self.create_timer(.5,self.lifecycle);self.create_timer(.05,self.tick)
+            self.steady_clock=Clock(clock_type=ClockType.STEADY_TIME)
+            self.create_timer(.5,self.lifecycle,clock=self.steady_clock)
+            self.create_timer(.05,self.tick,clock=self.steady_clock)
             self.server=socket.socket();self.server.bind((cfg['host'],0));self.server.listen(1);self.server.settimeout(.2)
             (file.parent/'endpoint.json').write_text(json.dumps({'host':cfg['host'],'port':self.server.getsockname()[1]}),encoding='utf-8')
             threading.Thread(target=self.network,daemon=True).start()
@@ -62,7 +66,7 @@ def main():
 
         def snapshot(self):
             with self.lock:
-                now=time.monotonic();ready=self.active and self.q is not None and now-self.qtime<.3 and self.sim_time is not None
+                now=time.monotonic();ready=self.active and self.q is not None and now-self.qtime<.3 and self.sim_time is not None and now-self.last_tick<.25
                 try:
                     t=self.tf.lookup_transform('world','tool_link',rclpy.time.Time()).transform.translation
                     tf_tip=(t.x,t.y,t.z)
@@ -72,6 +76,7 @@ def main():
                     'phase':self.motion.phase,'anchor':self.motion.anchor,'command_velocity':self.command_velocity,
                     'source':self.source,'guard_reason':self.guard_reason,
                     'sim_time':self.sim_time,
+                    'tick_age_ms':round((now-self.last_tick)*1000),
                     'status':self.status,'input_age_ms':round((now-self.last_input)*1000) if self.last_input else None,
                     'feedback_age_ms':round((now-self.qtime)*1000) if self.qtime else None}
 
@@ -128,6 +133,8 @@ def main():
         def tick(self):
             with self.lock:
                 now=time.monotonic()
+                if now-self.last_tick>.25:self.motion.clear('timeout');self.jog=None
+                self.last_tick=now
                 dt=simulation_dt(self.previous_sim_time,self.sim_time)
                 self.previous_sim_time=self.sim_time
                 if not self.active or self.q is None or now-self.qtime>.3 or self.sim_time is None:

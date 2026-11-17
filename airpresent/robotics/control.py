@@ -29,29 +29,52 @@ class Operator:
     def __init__(self):
         self.lock=threading.Lock()
         self.enabled=False;self.mode='xy';self.source='hand';self.jog=None
-        self.reason='先按住右侧方向按钮，确认仿真能动；再打开摄像头'
+        self.reason='点击一个方向，机械臂自动移动 1.5 厘米；再打开摄像头'
+        self.step_goal=None
 
     def snapshot(self):
         with self.lock:return self.enabled,self.mode,self.source,self.jog,self.reason
 
     def enable(self):
         with self.lock:
-            self.enabled=True;self.source='hand';self.jog=None;self.reason=''
+            self.enabled=True;self.source='hand';self.jog=None;self.reason='';self.step_goal=None
 
     def pause(self, reason='你已暂停控制；点击“启用手势”继续'):
         with self.lock:
-            self.enabled=False;self.jog=None;self.reason=reason
+            self.enabled=False;self.jog=None;self.reason=reason;self.step_goal=None
 
     def plane(self, mode):
         with self.lock:
             self.mode=mode;self.enabled=False;self.jog=None
+            self.step_goal=None
             self.reason='控制平面已切换；点击“启用手势”，再松开手指'
 
     def press(self, direction):
         with self.lock:
             self.enabled=False;self.source='buttons';self.jog=direction;self.reason=''
+            self.step_goal=None
+
+    def step(self,direction,position,now):
+        if direction not in ('x+','x-','y+','y-','z+','z-'):raise ValueError('Invalid direction')
+        if len(position)!=3 or not all(math.isfinite(v) for v in position):raise ValueError('Invalid position')
+        axis='xyz'.index(direction[0]);sign=1 if direction[1]=='+' else -1
+        with self.lock:
+            self.enabled=False;self.source='buttons';self.jog=direction;self.reason=''
+            self.step_goal=(axis,sign,position[axis],now+6.)
+
+    def advance_step(self,position,now,ready=True,guard=''):
+        with self.lock:
+            if self.step_goal is None:return
+            axis,sign,start,deadline=self.step_goal
+            reason=''
+            if guard:reason=guard
+            elif not ready:reason='仿真反馈中断，本次步进已停止'
+            elif now>=deadline:reason='仿真响应较慢，本次步进已停止；查看下方仿真速度'
+            elif position is not None and (position[axis]-start)*sign>=.0135:reason='本次步进完成；可再次点击方向'
+            if reason:self.jog=None;self.step_goal=None;self.reason=reason
 
     def release(self, reason='按钮已松开，机械臂停止；可继续按住其他方向'):
         with self.lock:
             if self.source=='buttons' and self.jog is not None:
                 self.jog=None;self.reason=reason
+                self.step_goal=None

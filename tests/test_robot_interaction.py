@@ -9,6 +9,20 @@ from test_core import hand
 
 
 class InteractionTests(unittest.TestCase):
+    def test_click_step_completes_from_actual_feedback(self):
+        operator=Operator();operator.step('y-',(.4,0.,.3),10.)
+        operator.advance_step((.4,-.008,.3),11.)
+        self.assertEqual(operator.snapshot()[3],'y-')
+        operator.advance_step((.4,-.014,.3),12.)
+        self.assertIsNone(operator.snapshot()[3]);self.assertIn('完成',operator.snapshot()[4])
+
+    def test_click_step_has_timeout_and_can_be_interrupted(self):
+        operator=Operator();operator.step('x+',(.4,0.,.3),10.)
+        operator.advance_step((.4,0.,.3),16.1)
+        self.assertIsNone(operator.snapshot()[3]);self.assertIn('响应较慢',operator.snapshot()[4])
+        operator.step('z+',(.4,0.,.3),20.);operator.pause()
+        self.assertIsNone(operator.snapshot()[3]);self.assertIsNone(operator.step_goal)
+
     def test_slow_or_stalled_simulation_cannot_accumulate_wall_time_targets(self):
         self.assertEqual(simulation_dt(10.,10.),0.)
         self.assertEqual(simulation_dt(10.,9.),0.)

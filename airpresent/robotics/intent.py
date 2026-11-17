@@ -7,6 +7,9 @@ from dataclasses import dataclass, asdict
 import math
 from ..gestures import Gesture
 
+DEADZONE=.012
+FULL_DISPLACEMENT=.10
+
 
 @dataclass(frozen=True)
 class Intent:
@@ -83,8 +86,8 @@ class HandVelocity:
         if self.anchor is None:
             self.anchor = p
         def axis(value):
-            value = math.copysign(max(0., abs(value) - .02), value)
-            return max(-1., min(1., value / .15))
+            value = math.copysign(max(0., abs(value) - DEADZONE), value)
+            return max(-1., min(1., value / FULL_DISPLACEMENT))
         x, y = axis(p[0] - self.anchor[0]), axis(self.anchor[1] - p[1])
         norm = max(1., math.hypot(x, y))
         x, y = x / norm * self.max_speed, y / norm * self.max_speed

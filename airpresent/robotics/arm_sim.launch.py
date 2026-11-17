@@ -15,11 +15,12 @@ def generate_launch_description():
     session=Path(os.environ['AIRHAND_ARM_SESSION'])
     settings=json.loads(session.read_text(encoding='utf-8'))
     folder=session.parent
+    world=shlex.quote(str(folder/'world.sdf')) if (folder/'world.sdf').exists() else 'empty.sdf'
     gui_args=''
     if settings['gui'] and (folder/'gui.config').exists():
         gui_args=' --gui-config '+shlex.quote(str(folder/'gui.config'))
     gazebo=IncludeLaunchDescription(PythonLaunchDescriptionSource(str(Path(get_package_share_directory('ros_gz_sim'))/'launch/gz_sim.launch.py')),
-        launch_arguments={'gz_args':('-r -v 1 empty.sdf'+gui_args if settings['gui'] else '-s -r -v 1 empty.sdf')}.items())
+        launch_arguments={'gz_args':(('-r -v 1 ' if settings['gui'] else '-s -r -v 1 ')+world+gui_args)}.items())
     description=(folder/'arm.urdf').read_text(encoding='utf-8')
     robot=Node(package='robot_state_publisher',executable='robot_state_publisher',parameters=[{'robot_description':description,'use_sim_time':True}])
     spawn=Node(package='ros_gz_sim',executable='create',arguments=['-topic','robot_description','-name','airhand_arm','-allow_renaming','false'])
